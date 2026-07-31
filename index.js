@@ -2,7 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 dotenv.config();
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const uri = process.env.MONGODB_URI;
 
@@ -27,13 +27,29 @@ async function run() {
     const db = client.db("medicare");
     const doctorCollection = db.collection("doctors");
 
-
-
-    app.post('/doctors', async (req, res) => {
-        const doctorData = req.body;
-        const result = await doctorCollection.insertOne(doctorData)
-        res.status(201).json(result);
+    app.get('/doctors', async (req, res) => {
+        const result = await doctorCollection.find().toArray()
+        res.json(result)
     })
+
+    app.get('/doctors/:userId', async (req, res) => {
+      const { userId } = req.params;
+      const result = await doctorCollection.findOne({ userId });
+      res.json(result); 
+    });
+
+    app.put('/doctors/:userId', async (req, res) => {
+      const { userId } = req.params;
+      const updateData = req.body;
+ 
+      const result = await doctorCollection.updateOne(
+        { userId },
+        { $set: { ...updateData, userId } },
+        { upsert: true }
+      );
+ 
+      res.json(result);
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
