@@ -26,6 +26,7 @@ async function run() {
 
     const db = client.db("medicare");
     const doctorCollection = db.collection("doctors");
+    const userCollection = db.collection("user");
 
     app.get('/doctors', async (req, res) => {
         const result = await doctorCollection.find().toArray()
@@ -38,17 +39,35 @@ async function run() {
       res.json(result); 
     });
 
-    app.put('/doctors/:userId', async (req, res) => {
+    app.put("/doctors/:userId", async (req, res) => {
       const { userId } = req.params;
       const updateData = req.body;
- 
-      const result = await doctorCollection.updateOne(
+
+      await doctorCollection.updateOne(
         { userId },
-        { $set: { ...updateData, userId } },
+        {
+          $set: {
+            ...updateData,
+            userId,
+          },
+        },
         { upsert: true }
       );
- 
-      res.json(result);
+
+      await userCollection.updateOne(
+        {
+          _id: new ObjectId(userId),
+        },
+        {
+          $set: {
+            photoUrl: updateData.photoUrl,
+          },
+        }
+      );
+
+      res.json({
+        success: true,
+      });
     });
 
     await client.db("admin").command({ ping: 1 });
