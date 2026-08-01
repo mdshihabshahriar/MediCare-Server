@@ -27,6 +27,12 @@ async function run() {
     const db = client.db("medicare");
     const doctorCollection = db.collection("doctors");
     const userCollection = db.collection("user");
+    const sessionCollection = db.collection("session");
+
+    app.get('/users', async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.json(result);
+    });
 
     app.get('/doctors', async (req, res) => {
       const result = await doctorCollection
@@ -148,6 +154,33 @@ async function run() {
         { $set: { verificationStatus: status } }
       );
  
+      res.json({ success: true });
+    });
+
+    app.patch('/users/:id/status', async (req, res) => {
+      const { id } = req.params;
+      const { status } = req.body; 
+ 
+      if (!["active", "suspended"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
+      }
+ 
+      await userCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status } }
+      );
+      if (status === "suspended") {
+        await sessionCollection.deleteMany({ userId: id });
+      }
+ 
+      res.json({ success: true });
+    });
+
+    app.delete('/users/:id', async (req, res) => {
+      const { id } = req.params;
+      await userCollection.deleteOne({ _id: new ObjectId(id) });
+      await doctorCollection.deleteOne({ userId: id });
+      await sessionCollection.deleteMany({ userId: id }); 
       res.json({ success: true });
     });
 
