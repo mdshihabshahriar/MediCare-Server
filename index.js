@@ -28,45 +28,69 @@ async function run() {
     const doctorCollection = db.collection("doctors");
     const userCollection = db.collection("user");
     const sessionCollection = db.collection("session");
+    const scheduleCollection = db.collection("schedule");
 
     app.get('/users', async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
     });
 
-    app.get('/doctors', async (req, res) => {
-      const result = await doctorCollection
-        .aggregate([
+    app.get("/doctors", async (req, res) => {
+  const { verifiedOnly } = req.query;
+
+  const pipeline = [
+    {
+      $lookup: {
+        from: "user",
+        let: { uid: "$userId" },
+        pipeline: [
           {
-            $lookup: {
-              from: "user",
-              let: { uid: "$userId" },
-              pipeline: [
-                { $match: { $expr: { $eq: [{ $toString: "$_id" }, "$$uid"] } } },
-              ],
-              as: "userInfo",
+            $match: {
+              $expr: {
+                $eq: [{ $toString: "$_id" }, "$$uid"],
+              },
             },
           },
-          { $unwind: "$userInfo" },
-          {
-            $project: {
-              userId: 1,
-              specialty: 1,
-              hospitalName: 1,
-              qualifications: 1,
-              experience: 1,
-              consultationFee: 1,
-              name: "$userInfo.name",
-              email: "$userInfo.email",
-              photoUrl: "$userInfo.photoUrl",
-              verificationStatus: "$userInfo.verificationStatus",
-            },
-          },
-        ])
-        .toArray();
- 
-      res.json(result);
+        ],
+        as: "userInfo",
+      },
+    },
+    {
+      $unwind: "$userInfo",
+    },
+  ];
+
+  if (verifiedOnly === "true") {
+    pipeline.push({
+      $match: {
+        "userInfo.role": "doctor",
+        "userInfo.verificationStatus": "verified",
+      },
     });
+  }
+
+  pipeline.push({
+    $project: {
+      userId: 1,
+      specialty: 1,
+      hospitalName: 1,
+      qualifications: 1,
+      experience: 1,
+      consultationFee: 1,
+      rating: 1,
+
+      name: "$userInfo.name",
+      email: "$userInfo.email",
+      photoUrl: "$userInfo.photoUrl",
+      role: "$userInfo.role",
+      verificationStatus: "$userInfo.verificationStatus",
+    },
+  });
+
+  const result = await doctorCollection.aggregate(pipeline).toArray();
+
+  res.json(result);
+});
 
     app.get('/doctors/:userId', async (req, res) => {
       const { userId } = req.params;
@@ -110,6 +134,31 @@ async function run() {
       res.json(activity);
     });
 
+    app.get("/schedules/:doctorId", async(req,res)=>{
+
+      const {doctorId}=req.params;
+
+      const result=await scheduleCollection.find({
+          doctorId,
+          isAvailable:true
+      }).toArray();
+
+      res.json(result);
+
+    });
+
+    app.post("/schedules", async (req,res)=>{
+      const schedule=req.body;
+
+      schedule.createdAt=new Date();
+      schedule.updatedAt=new Date();
+      schedule.isAvailable=true;
+
+      const result=await scheduleCollection.insertOne(schedule);
+
+      res.json(result);
+    });
+
     app.put("/doctors/:userId", async (req, res) => {
       const { userId } = req.params;
       const updateData = req.body;
@@ -140,6 +189,26 @@ async function run() {
         success: true,
       });
     });
+
+    app.patch("/schedules/:id",async(req,res)=>{
+
+        const {id}=req.params;
+
+        const data=req.body;
+
+        const result=await scheduleCollection.updateOne(
+            {_id:new ObjectId(id)},
+            {
+                $set:{
+                    ...data,
+                    updatedAt:new Date()
+                }
+            }
+        )
+
+        res.json(result);
+
+    })
 
     app.patch("/doctors/:userId/verification", async (req, res) => {
       const { userId } = req.params;
@@ -182,6 +251,18 @@ async function run() {
       await doctorCollection.deleteOne({ userId: id });
       await sessionCollection.deleteMany({ userId: id }); 
       res.json({ success: true });
+    });
+
+    app.delete("/schedules/:id",async(req,res)=>{
+
+      const {id}=req.params;
+
+      const result=await scheduleCollection.deleteOne({
+          _id:new ObjectId(id)
+      });
+
+      res.json(result);
+
     });
 
     await client.db("admin").command({ ping: 1 });
