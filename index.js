@@ -27,6 +27,7 @@ async function run() {
     const db = client.db("medicare");
     const doctorCollection = db.collection("doctors");
     const userCollection = db.collection("user");
+    const appointmentCollection = db.collection("appointments");
     const sessionCollection = db.collection("session");
     const scheduleCollection = db.collection("schedule");
 
@@ -147,6 +148,90 @@ async function run() {
 
     });
 
+    app.get("/appointments/patient/:patientId", async (req, res) => {
+      const { patientId } = req.params;
+
+      const result = await appointmentCollection
+        .aggregate([
+          {
+            $match: {
+              patientId,
+            },
+          },
+          {
+            $lookup: {
+              from: "user",
+              let: {
+                doctorId: "$doctorId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: [
+                        {
+                          $toString: "$_id",
+                        },
+                        "$$doctorId",
+                      ],
+                    },
+                  },
+                },
+              ],
+              as: "doctor",
+            },
+          },
+          {
+            $unwind: "$doctor",
+          },
+        ])
+        .toArray();
+
+      res.json(result);
+    });
+
+    app.get("/appointments/doctor/:doctorId", async (req, res) => {
+      const { doctorId } = req.params;
+
+      const result = await appointmentCollection
+        .aggregate([
+          {
+            $match: {
+              doctorId,
+            },
+          },
+          {
+            $lookup: {
+              from: "user",
+              let: {
+                patientId: "$patientId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: [
+                        {
+                          $toString: "$_id",
+                        },
+                        "$$patientId",
+                      ],
+                    },
+                  },
+                },
+              ],
+              as: "patient",
+            },
+          },
+          {
+            $unwind: "$patient",
+          },
+        ])
+        .toArray();
+
+      res.json(result);
+    });
+
     app.post("/schedules", async (req,res)=>{
       const schedule=req.body;
 
@@ -155,6 +240,17 @@ async function run() {
       schedule.isAvailable=true;
 
       const result=await scheduleCollection.insertOne(schedule);
+
+      res.json(result);
+    });
+
+    app.post("/appointments", async (req, res) => {
+      const appointment = req.body;
+
+      appointment.status = "pending";
+      appointment.createdAt = new Date();
+
+      const result = await appointmentCollection.insertOne(appointment);
 
       res.json(result);
     });
@@ -210,6 +306,39 @@ async function run() {
 
     })
 
+    app.patch("/appointments/:id/status", async (req, res) => {
+      const { id } = req.params;
+
+      const { status } = req.body;
+
+      if (
+        ![
+          "pending",
+          "accepted",
+          "completed",
+          "cancelled",
+          "rejected",
+        ].includes(status)
+      ) {
+        return res.status(400).json({
+          error: "Invalid Status",
+        });
+      }
+
+      const result = await appointmentCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+        },
+        {
+          $set: {
+            status,
+          },
+        }
+      );
+
+      res.json(result);
+    });
+
     app.patch("/doctors/:userId/verification", async (req, res) => {
       const { userId } = req.params;
       const { status } = req.body; // "verified" | "rejected" | "pending"
@@ -263,6 +392,16 @@ async function run() {
 
       res.json(result);
 
+    });
+
+    app.delete("/appointments/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const result = await appointmentCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.json(result);
     });
 
     await client.db("admin").command({ ping: 1 });
