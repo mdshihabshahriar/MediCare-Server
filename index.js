@@ -30,6 +30,7 @@ async function run() {
     const appointmentCollection = db.collection("appointments");
     const sessionCollection = db.collection("session");
     const scheduleCollection = db.collection("schedule");
+    const prescriptionCollection = db.collection("prescriptions");
 
     app.get('/users', async (req, res) => {
       const result = await userCollection.find().toArray();
@@ -232,6 +233,40 @@ async function run() {
       res.json(result);
     });
 
+    app.get("/prescriptions/doctor/:doctorId", async (req, res) => {
+      const { doctorId } = req.params;
+ 
+      const result = await prescriptionCollection
+        .find({ doctorId })
+        .sort({ createdAt: -1 })
+        .toArray();
+ 
+      res.json(result);
+    });
+
+    app.get("/appointments/:id", async (req, res) => {
+      const { id } = req.params;
+ 
+      const result = await appointmentCollection
+        .aggregate([
+          { $match: { _id: new ObjectId(id) } },
+          {
+            $lookup: {
+              from: "user",
+              let: { patientId: "$patientId" },
+              pipeline: [
+                { $match: { $expr: { $eq: [{ $toString: "$_id" }, "$$patientId"] } } },
+              ],
+              as: "patient",
+            },
+          },
+          { $unwind: "$patient" },
+        ])
+        .toArray();
+ 
+      res.json(result[0] || null);
+    });
+
     app.post("/schedules", async (req,res)=>{
       const schedule=req.body;
 
@@ -252,6 +287,17 @@ async function run() {
 
       const result = await appointmentCollection.insertOne(appointment);
 
+      res.json(result);
+    });
+
+    app.post("/prescriptions", async (req, res) => {
+      const prescription = req.body;
+ 
+      prescription.createdAt = new Date();
+      prescription.updatedAt = new Date();
+ 
+      const result = await prescriptionCollection.insertOne(prescription);
+ 
       res.json(result);
     });
 
@@ -372,6 +418,18 @@ async function run() {
       }
  
       res.json({ success: true });
+    });
+
+    app.patch("/prescriptions/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+ 
+      const result = await prescriptionCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { ...data, updatedAt: new Date() } }
+      );
+ 
+      res.json(result);
     });
 
     app.delete('/users/:id', async (req, res) => {
