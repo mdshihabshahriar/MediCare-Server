@@ -267,6 +267,39 @@ async function run() {
       res.json(result[0] || null);
     });
 
+    app.get("/doctors/:doctorId/stats", async (req, res) => {
+      try {
+        const { doctorId } = req.params;
+
+        const patients = await appointmentCollection
+          .aggregate([
+            { $match: { doctorId } },
+            {
+              $group: {
+                _id: "$patientId",
+              },
+            },
+          ])
+          .toArray();
+
+        const upcomingCount = await appointmentCollection.countDocuments({
+          doctorId,
+          status: "accepted",
+        });
+
+        res.json({
+          totalPatients: patients.length,
+          upcomingAppointments: upcomingCount,
+          reviewsReceived: 0,
+        });
+      } catch (err) {
+        console.error("Stats Route Error:", err);
+        res.status(500).json({
+          message: err.message,
+        });
+      }
+    });
+
     app.post("/schedules", async (req,res)=>{
       const schedule=req.body;
 
