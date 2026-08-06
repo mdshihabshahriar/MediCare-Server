@@ -31,6 +31,7 @@ async function run() {
     const sessionCollection = db.collection("session");
     const scheduleCollection = db.collection("schedule");
     const prescriptionCollection = db.collection("prescriptions");
+    const reviewCollection = db.collection("reviews");
 
     app.get('/users', async (req, res) => {
       const result = await userCollection.find().toArray();
@@ -185,6 +186,31 @@ async function run() {
           {
             $unwind: "$doctor",
           },
+          {
+          $lookup: {
+            from: "reviews",
+            let: {
+              appointmentId: { $toString: "$_id" },
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: ["$appointmentId", "$$appointmentId"],
+                  },
+                },
+              },
+            ],
+            as: "review",
+          },
+        },
+        {
+          $addFields: {
+            hasReview: {
+              $gt: [{ $size: "$review" }, 0],
+            },
+          },
+        },
         ])
         .toArray();
 
@@ -300,6 +326,55 @@ async function run() {
       }
     });
 
+    app.get("/reviews/patient/:patientId", async (req, res) => {
+      const { patientId } = req.params;
+
+      const result = await reviewCollection
+        .aggregate([
+          {
+            $match: { patientId },
+          },
+          {
+            $lookup: {
+              from: "user",
+              let: {
+                doctorId: "$doctorId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: [
+                        { $toString: "$_id" },
+                        "$$doctorId",
+                      ],
+                    },
+                  },
+                },
+              ],
+              as: "doctor",
+            },
+          },
+          {
+            $unwind: "$doctor",
+          },
+          {
+            $project: {
+              rating: 1,
+              comment: 1,
+              createdAt: 1,
+              doctorId: 1,
+              patientId: 1,
+              doctorName: "$doctor.name",
+              doctorPhoto: "$doctor.photoUrl",
+            },
+          },
+        ])
+        .toArray();
+
+      res.json(result);
+    });
+
     app.post("/schedules", async (req,res)=>{
       const schedule=req.body;
 
@@ -332,6 +407,56 @@ async function run() {
       const result = await prescriptionCollection.insertOne(prescription);
  
       res.json(result);
+    });
+
+    app.post("/reviews", async (req, res) => {
+      const {
+        appointmentId,
+        doctorId,
+        patientId,
+        rating,
+        comment,
+      } = req.body;
+
+      const appointment = await appointmentCollection.findOne({
+        _id: new ObjectId(appointmentId),
+        doctorId,
+        patientId,
+        status: "completed",
+      });
+
+      if (!appointment) {
+        return res.status(403).json({
+          message: "You cannot review this doctor.",
+        });
+      }
+
+      const exists = await reviewCollection.findOne({
+        appointmentId,
+      });
+
+      if (exists) {
+        return res.status(400).json({
+          message: "Review already submitted.",
+        });
+      }
+
+      const review = {
+        appointmentId,
+        doctorId,
+        patientId,
+        rating,
+        comment,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await reviewCollection.insertOne(review);
+
+      res.json({
+        success: true,
+        insertedId: result.insertedId.toString(),
+      });
     });
 
     app.put("/doctors/:userId", async (req, res) => {
@@ -465,6 +590,27 @@ async function run() {
       res.json(result);
     });
 
+    app.patch("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const { rating, comment } = req.body;
+
+      const result = await reviewCollection.updateOne(
+        {
+          _id: new ObjectId(id),
+        },
+        {
+          $set: {
+            rating,
+            comment,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      res.json(result);
+    });
+
     app.delete('/users/:id', async (req, res) => {
       const { id } = req.params;
       await userCollection.deleteOne({ _id: new ObjectId(id) });
@@ -489,6 +635,16 @@ async function run() {
       const { id } = req.params;
 
       const result = await appointmentCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+
+      res.json(result);
+    });
+
+    app.delete("/reviews/:id", async (req, res) => {
+      const { id } = req.params;
+
+      const result = await reviewCollection.deleteOne({
         _id: new ObjectId(id),
       });
 
