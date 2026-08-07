@@ -447,6 +447,147 @@ async function run() {
       res.json(result);
     });
 
+    app.get("/analytics/summary", async (req, res) => {
+      const totalPatients = await userCollection.countDocuments({
+        role: "patient",
+      });
+
+      const totalDoctors = await userCollection.countDocuments({
+        role: "doctor",
+        verificationStatus: "verified",
+      });
+
+      const totalAppointments =
+        await appointmentCollection.countDocuments();
+
+      res.json({
+        totalPatients,
+        totalDoctors,
+        totalAppointments,
+      });
+    });
+
+    app.get("/analytics/doctor-performance", async (req, res) => {
+
+      const result = await doctorCollection
+        .aggregate([
+          {
+            $lookup: {
+              from: "user",
+              let: { uid: "$userId" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: [{ $toString: "$_id" }, "$$uid"] },
+                  },
+                },
+              ],
+              as: "user",
+            },
+          },
+          { $unwind: "$user" },
+          {
+            $lookup: {
+              from: "reviews",
+              let: { docId: "$userId" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: ["$doctorId", "$$docId"] },
+                  },
+                },
+              ],
+              as: "reviews",
+            },
+          },
+          {
+            $addFields: {
+              averageRating: {
+                $cond: [
+                  { $gt: [{ $size: "$reviews" }, 0] },
+                  { $round: [{ $avg: "$reviews.rating" }, 1] },
+                  0,
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              name: "$user.name",
+              averageRating: 1,
+            },
+          },
+          {
+            $sort: { averageRating: -1 },
+          },
+          {
+            $limit: 6,
+          },
+        ])
+        .toArray();
+
+      res.json(result);
+    });
+
+    app.get("/analytics/monthly-trend", async (req, res) => {
+
+      const result = await appointmentCollection.aggregate([
+        {
+          $group: {
+            _id: {
+              month: {
+                $month: "$createdAt",
+              },
+            },
+            appointments: {
+              $sum: 1,
+            },
+            patients: {
+              $addToSet: "$patientId",
+            },
+          },
+        },
+        {
+          $project: {
+            month: "$_id.month",
+            appointments: 1,
+            patients: {
+              $size: "$patients",
+            },
+          },
+        },
+        {
+          $sort: {
+            month: 1,
+          },
+        },
+      ]).toArray();
+
+      const months = [
+        "",
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+
+      res.json(
+        result.map((item) => ({
+          month: months[item.month],
+          patients: item.patients,
+          appointments: item.appointments,
+        }))
+      );
+    });
+
     app.post("/schedules", async (req,res)=>{
       const schedule=req.body;
 
