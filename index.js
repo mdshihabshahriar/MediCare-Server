@@ -297,29 +297,44 @@ async function run() {
       try {
         const { doctorId } = req.params;
 
-        const patients = await appointmentCollection
-          .aggregate([
-            { $match: { doctorId } },
-            {
-              $group: {
-                _id: "$patientId",
-              },
+        const patients = await appointmentCollection.aggregate([
+          {
+            $match: { doctorId },
+          },
+          {
+            $group: {
+              _id: "$patientId",
             },
-          ])
+          },
+        ]).toArray();
+
+        const upcomingAppointments =
+          await appointmentCollection.countDocuments({
+            doctorId,
+            status: "accepted",
+          });
+
+        const reviews = await reviewCollection
+          .find({ doctorId })
           .toArray();
 
-        const upcomingCount = await appointmentCollection.countDocuments({
-          doctorId,
-          status: "accepted",
-        });
+        const reviewsReceived = reviews.length;
+
+        const averageRating =
+          reviewsReceived > 0
+            ? (
+                reviews.reduce((sum, r) => sum + Number(r.rating), 0) /
+                reviewsReceived
+              ).toFixed(1)
+            : 0;
 
         res.json({
           totalPatients: patients.length,
-          upcomingAppointments: upcomingCount,
-          reviewsReceived: 0,
+          upcomingAppointments,
+          reviewsReceived,
+          averageRating,
         });
       } catch (err) {
-        console.error("Stats Route Error:", err);
         res.status(500).json({
           message: err.message,
         });
@@ -371,6 +386,63 @@ async function run() {
           },
         ])
         .toArray();
+
+      res.json(result);
+    });
+
+    app.get("/reviews/doctor/:doctorId", async (req, res) => {
+      const { doctorId } = req.params;
+
+      const result = await reviewCollection.aggregate([
+        {
+          $match: {
+            doctorId,
+          },
+        },
+        {
+          $lookup: {
+            from: "user",
+            let: {
+              patientId: "$patientId",
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: [
+                      {
+                        $toString: "$_id",
+                      },
+                      "$$patientId",
+                    ],
+                  },
+                },
+              },
+            ],
+            as: "patient",
+          },
+        },
+        {
+          $unwind: "$patient",
+        },
+        {
+          $sort: {
+            createdAt: -1,
+          },
+        },
+        {
+          $limit: 5,
+        },
+        {
+          $project: {
+            rating: 1,
+            comment: 1,
+            createdAt: 1,
+            patientName: "$patient.name",
+            patientPhoto: "$patient.photoUrl",
+          },
+        },
+      ]).toArray();
 
       res.json(result);
     });
