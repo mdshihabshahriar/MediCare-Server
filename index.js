@@ -601,14 +601,63 @@ async function run() {
     });
 
     app.post("/appointments", async (req, res) => {
-      const appointment = req.body;
+      try {
+        const appointment = req.body;
 
-      appointment.status = "pending";
-      appointment.createdAt = new Date();
+        if (
+          !appointment.doctorId ||
+          !appointment.patientId ||
+          !appointment.scheduleId ||
+          !appointment.appointmentDay ||
+          !appointment.appointmentStartTime
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Missing required appointment information",
+          });
+        }
 
-      const result = await appointmentCollection.insertOne(appointment);
+        const doctor = await userCollection.findOne({
+          _id: new ObjectId(appointment.doctorId),
+        });
 
-      res.json(result);
+        if (!doctor) {
+          return res.status(404).json({
+            success: false,
+            message: "Doctor not found.",
+          });
+        }
+
+        appointment.doctorName = doctor.name;
+
+        appointment.status = "pending";
+
+        appointment.paymentStatus =
+          appointment.paymentStatus || "pending";
+
+        appointment.stripeSessionId =
+          appointment.stripeSessionId || null;
+
+        appointment.createdAt = new Date();
+        appointment.updatedAt = new Date();
+
+        const result = await appointmentCollection.insertOne(
+          appointment
+        );
+
+        res.json({
+          success: true,
+          insertedId: result.insertedId,
+        });
+
+      } catch (error) {
+        console.error("Appointment creation error:", error);
+
+        res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
     });
 
     app.post("/prescriptions", async (req, res) => {
@@ -822,6 +871,46 @@ async function run() {
       );
 
       res.json(result);
+    });
+
+    app.patch("/appointments/:id/payment", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { transactionId, paymentSessionId, amountPaid } = req.body;
+
+        const result = await appointmentCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              paymentStatus: "paid",
+              paymentMethod: "stripe",
+              transactionId: transactionId || null,
+              paymentSessionId: paymentSessionId || null,
+              amountPaid: amountPaid || 0,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Appointment not found",
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Appointment payment updated successfully",
+        });
+      } catch (error) {
+        console.error("Update payment error:", error);
+
+        res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
     });
 
     app.delete('/users/:id', async (req, res) => {
