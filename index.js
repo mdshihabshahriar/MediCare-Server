@@ -180,37 +180,98 @@ async function run() {
                   },
                 },
               ],
-              as: "doctor",
+              as: "doctorUser",
             },
           },
           {
-            $unwind: "$doctor",
+            $unwind: "$doctorUser",
           },
           {
-          $lookup: {
-            from: "reviews",
-            let: {
-              appointmentId: { $toString: "$_id" },
-            },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $eq: ["$appointmentId", "$$appointmentId"],
+            $lookup: {
+              from: "doctors",
+              let: {
+                doctorId: "$doctorId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$userId", "$$doctorId"],
+                    },
                   },
                 },
-              },
-            ],
-            as: "review",
-          },
-        },
-        {
-          $addFields: {
-            hasReview: {
-              $gt: [{ $size: "$review" }, 0],
+              ],
+              as: "doctorProfile",
             },
           },
-        },
+          {
+            $unwind: {
+              path: "$doctorProfile",
+              preserveNullAndEmptyArrays: true,
+            },
+          },
+          {
+            $addFields: {
+              doctor: {
+                $mergeObjects: ["$doctorUser", "$doctorProfile"],
+              },
+            },
+          },
+          {
+            $lookup: {
+              from: "schedule",
+              let: {
+                scheduleId: "$scheduleId",
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: [{ $toString: "$_id" }, "$$scheduleId"],
+                    },
+                  },
+                },
+              ],
+              as: "schedule",
+            },
+          },
+          {
+            $unwind: {
+              path: "$schedule",
+              preserveNullAndEmptyArrays: true,
+            },
+          },
+          {
+            $lookup: {
+              from: "reviews",
+              let: {
+                appointmentId: { $toString: "$_id" },
+              },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $eq: ["$appointmentId", "$$appointmentId"],
+                    },
+                  },
+                },
+              ],
+              as: "review",
+            },
+          },
+          {
+            $addFields: {
+              hasReview: {
+                $gt: [{ $size: "$review" }, 0],
+              },
+            },
+          },
+          {
+            $project: {
+              doctorUser: 0,
+              doctorProfile: 0,
+            },
+          },
         ])
         .toArray();
 
