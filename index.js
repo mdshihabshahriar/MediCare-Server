@@ -39,61 +39,90 @@ async function run() {
     });
 
     app.get("/doctors", async (req, res) => {
-  const { verifiedOnly } = req.query;
+      const { verifiedOnly } = req.query;
 
-  const pipeline = [
-    {
-      $lookup: {
-        from: "user",
-        let: { uid: "$userId" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $eq: [{ $toString: "$_id" }, "$$uid"],
+      const pipeline = [
+        {
+          $lookup: {
+            from: "user",
+            let: { uid: "$userId" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $eq: [{ $toString: "$_id" }, "$$uid"],
+                  },
+                },
               },
-            },
+            ],
+            as: "userInfo",
           },
-        ],
-        as: "userInfo",
-      },
-    },
-    {
-      $unwind: "$userInfo",
-    },
-  ];
+        },
+        {
+          $unwind: "$userInfo",
+        },
+      ];
 
-  if (verifiedOnly === "true") {
-    pipeline.push({
-      $match: {
-        "userInfo.role": "doctor",
-        "userInfo.verificationStatus": "verified",
-      },
+      if (verifiedOnly === "true") {
+        pipeline.push({
+          $match: {
+            "userInfo.role": "doctor",
+            "userInfo.verificationStatus": "verified",
+          },
+        });
+      }
+
+      pipeline.push(
+        {
+          $lookup: {
+            from: "reviews",
+            let: { docId: "$userId" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: { $eq: ["$doctorId", "$$docId"] },
+                },
+              },
+            ],
+            as: "doctorReviews",
+          },
+        },
+        {
+          $addFields: {
+            averageRating: {
+              $cond: [
+                { $gt: [{ $size: "$doctorReviews" }, 0] },
+                { $round: [{ $avg: "$doctorReviews.rating" }, 1] },
+                0,
+              ],
+            },
+            reviewCount: { $size: "$doctorReviews" },
+          },
+        },
+        {
+          $project: {
+            userId: 1,
+            specialty: 1,
+            hospitalName: 1,
+            qualifications: 1,
+            experience: 1,
+            consultationFee: 1,
+            rating: "$averageRating",
+            reviewCount: 1,
+
+            name: "$userInfo.name",
+            email: "$userInfo.email",
+            photoUrl: "$userInfo.photoUrl",
+            role: "$userInfo.role",
+            verificationStatus: "$userInfo.verificationStatus",
+          },
+        }
+      );
+
+      const result = await doctorCollection.aggregate(pipeline).toArray();
+
+      res.json(result);
     });
-  }
-
-  pipeline.push({
-    $project: {
-      userId: 1,
-      specialty: 1,
-      hospitalName: 1,
-      qualifications: 1,
-      experience: 1,
-      consultationFee: 1,
-      rating: 1,
-
-      name: "$userInfo.name",
-      email: "$userInfo.email",
-      photoUrl: "$userInfo.photoUrl",
-      role: "$userInfo.role",
-      verificationStatus: "$userInfo.verificationStatus",
-    },
-  });
-
-  const result = await doctorCollection.aggregate(pipeline).toArray();
-
-  res.json(result);
-});
 
     app.get('/doctors/:userId', async (req, res) => {
       const { userId } = req.params;
@@ -148,6 +177,52 @@ async function run() {
 
       res.json(result);
 
+    });
+
+    app.get("/appointments", async (req, res) => {
+      const result = await appointmentCollection
+        .aggregate([
+          {
+            $lookup: {
+              from: "user",
+              let: { patientId: "$patientId" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: [{ $toString: "$_id" }, "$$patientId"] },
+                  },
+                },
+              ],
+              as: "patient",
+            },
+          },
+          {
+            $unwind: { path: "$patient", preserveNullAndEmptyArrays: true },
+          },
+          {
+            $lookup: {
+              from: "user",
+              let: { doctorId: "$doctorId" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: [{ $toString: "$_id" }, "$$doctorId"] },
+                  },
+                },
+              ],
+              as: "doctor",
+            },
+          },
+          {
+            $unwind: { path: "$doctor", preserveNullAndEmptyArrays: true },
+          },
+          {
+            $sort: { createdAt: -1 },
+          },
+        ])
+        .toArray();
+
+      res.json(result);
     });
 
     app.get("/appointments/patient/:patientId", async (req, res) => {
