@@ -852,18 +852,35 @@ async function run() {
         });
       }
 
+      const appointment = await appointmentCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!appointment) {
+        return res.status(404).json({
+          error: "Appointment not found",
+        });
+      }
+
+      const updateFields = { status, updatedAt: new Date() };
+
+      if (status === "cancelled" && appointment.paymentStatus === "paid") {
+        updateFields.paymentStatus = "refunded";
+      }
+
       const result = await appointmentCollection.updateOne(
         {
           _id: new ObjectId(id),
         },
         {
-          $set: {
-            status,
-          },
+          $set: updateFields,
         }
       );
 
-      res.json(result);
+      res.json({
+        ...result,
+        refunded: updateFields.paymentStatus === "refunded",
+      });
     });
 
     app.patch("/doctors/:userId/verification", async (req, res) => {
