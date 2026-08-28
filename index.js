@@ -39,90 +39,126 @@ async function run() {
     });
 
     app.get("/doctors", async (req, res) => {
-      const { verifiedOnly } = req.query;
+    const { verifiedOnly, search, specialty, sortBy } = req.query;
 
-      const pipeline = [
-        {
-          $lookup: {
-            from: "user",
-            let: { uid: "$userId" },
-            pipeline: [
-              {
-                $match: {
-                  $expr: {
-                    $eq: [{ $toString: "$_id" }, "$$uid"],
-                  },
-                },
+    const limit = Number(req.query.limit) || 9;
+    const page = Number(req.query.page) || 1;
+    const skip = (page - 1) * limit;
+
+    const pipeline = [
+    {
+      $lookup: {
+        from: "user",
+        let: { uid: "$userId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $eq: [{ $toString: "$_id" }, "$$uid"],
               },
-            ],
-            as: "userInfo",
-          },
-        },
-        {
-          $unwind: "$userInfo",
-        },
-      ];
-
-      if (verifiedOnly === "true") {
-        pipeline.push({
-          $match: {
-            "userInfo.role": "doctor",
-            "userInfo.verificationStatus": "verified",
-          },
-        });
-      }
-
-      pipeline.push(
-        {
-          $lookup: {
-            from: "reviews",
-            let: { docId: "$userId" },
-            pipeline: [
-              {
-                $match: {
-                  $expr: { $eq: ["$doctorId", "$$docId"] },
-                },
-              },
-            ],
-            as: "doctorReviews",
-          },
-        },
-        {
-          $addFields: {
-            averageRating: {
-              $cond: [
-                { $gt: [{ $size: "$doctorReviews" }, 0] },
-                { $round: [{ $avg: "$doctorReviews.rating" }, 1] },
-                0,
-              ],
             },
-            reviewCount: { $size: "$doctorReviews" },
           },
+        ],
+        as: "userInfo",
+      },
+    },
+    {
+      $unwind: "$userInfo",
+    },
+  ];
+
+  const matchConditions = {};
+
+  if (verifiedOnly === "true") {
+    matchConditions["userInfo.role"] = "doctor";
+    matchConditions["userInfo.verificationStatus"] = "verified";
+  }
+
+  if (specialty && specialty !== "All Specializations") {
+    matchConditions["specialty"] = specialty;
+  }
+
+  if (search) {
+    matchConditions["userInfo.name"] = { $regex: search, $options: "i" };
+  }
+
+  if (Object.keys(matchConditions).length > 0) {
+    pipeline.push({ $match: matchConditions });
+  }
+
+  const countPipeline = [...pipeline, { $count: "total" }];
+  const countResult = await doctorCollection.aggregate(countPipeline).toArray();
+  const total_data = countResult[0]?.total || 0;
+  const total_pages = Math.ceil(total_data / limit);
+
+  pipeline.push(
+    {
+      $lookup: {
+        from: "reviews",
+        let: { docId: "$userId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$doctorId", "$$docId"] },
+            },
+          },
+        ],
+        as: "doctorReviews",
+      },
+    },
+    {
+      $addFields: {
+        averageRating: {
+          $cond: [
+            { $gt: [{ $size: "$doctorReviews" }, 0] },
+            { $round: [{ $avg: "$doctorReviews.rating" }, 1] },
+            0,
+          ],
         },
-        {
-          $project: {
-            userId: 1,
-            specialty: 1,
-            hospitalName: 1,
-            qualifications: 1,
-            experience: 1,
-            consultationFee: 1,
-            rating: "$averageRating",
-            reviewCount: 1,
+        reviewCount: { $size: "$doctorReviews" },
+      },
+    },
+    {
+      $project: {
+        userId: 1,
+        specialty: 1,
+        hospitalName: 1,
+        qualifications: 1,
+        experience: 1,
+        consultationFee: 1,
+        rating: "$averageRating",
+        reviewCount: 1,
+        name: "$userInfo.name",
+        email: "$userInfo.email",
+        photoUrl: "$userInfo.photoUrl",
+        role: "$userInfo.role",
+        verificationStatus: "$userInfo.verificationStatus",
+      },
+    }
+  );
 
-            name: "$userInfo.name",
-            email: "$userInfo.email",
-            photoUrl: "$userInfo.photoUrl",
-            role: "$userInfo.role",
-            verificationStatus: "$userInfo.verificationStatus",
-          },
-        }
-      );
+  const sortMap = {
+    feeLow: { consultationFee: 1 },
+    feeHigh: { consultationFee: -1 },
+    experience: { experience: -1 },
+    quality: { rating: -1 },
+  };
 
-      const result = await doctorCollection.aggregate(pipeline).toArray();
+  pipeline.push(
+    { $sort: sortMap[sortBy] || { consultationFee: 1 } },
+    { $skip: skip },
+    { $limit: limit }
+  );
 
-      res.json(result);
-    });
+  const result = await doctorCollection.aggregate(pipeline).toArray();
+
+  res.json({
+    doctors: result,
+    total_data,
+    total_pages,
+    current_page: page,
+  });
+});
 
     app.get('/doctors/:userId', async (req, res) => {
       const { userId } = req.params;
