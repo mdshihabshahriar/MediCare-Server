@@ -3,6 +3,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 const uri = process.env.MONGODB_URI;
 
@@ -20,6 +21,37 @@ const client = new MongoClient(uri, {
   }
 });
 
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`))
+
+const verifyToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    // console.log("Authorization Header:", authHeader);
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'Unauthorized access' });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    // console.log("Extracted Token:", token);
+
+    if (!token) {
+        return res.status(401).json({ message: 'Unauthorized access' });
+    }
+
+    try{
+      const {payload} = await jwtVerify(token, JWKS)
+
+      console.log(payload)
+      next()
+    }
+
+    catch(error){
+      console.log(error)
+      res.status(401).json({ message: 'Unauthorized access' });
+    }
+
+}
+
 async function run() {
   try {
     await client.connect();
@@ -33,7 +65,7 @@ async function run() {
     const prescriptionCollection = db.collection("prescriptions");
     const reviewCollection = db.collection("reviews");
 
-    app.get('/users', async (req, res) => {
+    app.get('/users', verifyToken, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.json(result);
     });
@@ -166,7 +198,7 @@ async function run() {
       res.json(result); 
     });
 
-    app.get('/admin/stats', async (req, res) => {
+    app.get('/admin/stats', verifyToken, async (req, res) => {
       const [totalUsers, totalDoctors, totalPatients, pendingVerifications] =
         await Promise.all([
           userCollection.countDocuments({}),
@@ -183,7 +215,7 @@ async function run() {
       });
     });
 
-    app.get('/users/:id', async (req, res) => {
+    app.get('/users/:id', verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
 
@@ -204,7 +236,7 @@ async function run() {
       }
     });
 
-    app.get('/admin/recent-activity', async (req, res) => {
+    app.get('/admin/recent-activity', verifyToken, async (req, res) => {
       const recentUsers = await userCollection
         .find({})
         .sort({ createdAt: -1 })
@@ -223,7 +255,7 @@ async function run() {
       res.json(activity);
     });
 
-    app.get("/schedules/:doctorId", async(req,res)=>{
+    app.get("/schedules/:doctorId", verifyToken, async(req,res)=>{
 
       const {doctorId}=req.params;
 
@@ -236,7 +268,7 @@ async function run() {
 
     });
 
-    app.get("/appointments", async (req, res) => {
+    app.get("/appointments", verifyToken, async (req, res) => {
       const result = await appointmentCollection
         .aggregate([
           {
@@ -282,7 +314,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/appointments/patient/:patientId", async (req, res) => {
+    app.get("/appointments/patient/:patientId", verifyToken, async (req, res) => {
       const { patientId } = req.params;
 
       const result = await appointmentCollection
@@ -410,7 +442,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/appointments/doctor/:doctorId", async (req, res) => {
+    app.get("/appointments/doctor/:doctorId", verifyToken, async (req, res) => {
       const { doctorId } = req.params;
 
       const result = await appointmentCollection
@@ -452,7 +484,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/prescriptions/doctor/:doctorId", async (req, res) => {
+    app.get("/prescriptions/doctor/:doctorId", verifyToken, async (req, res) => {
       const { doctorId } = req.params;
  
       const result = await prescriptionCollection
@@ -463,7 +495,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/appointments/:id", async (req, res) => {
+    app.get("/appointments/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
  
       const result = await appointmentCollection
@@ -486,7 +518,7 @@ async function run() {
       res.json(result[0] || null);
     });
 
-    app.get("/doctors/:doctorId/stats", async (req, res) => {
+    app.get("/doctors/:doctorId/stats", verifyToken, async (req, res) => {
       try {
         const { doctorId } = req.params;
 
@@ -534,7 +566,7 @@ async function run() {
       }
     });
 
-    app.get("/reviews/patient/:patientId", async (req, res) => {
+    app.get("/reviews/patient/:patientId", verifyToken, async (req, res) => {
       const { patientId } = req.params;
 
       const result = await reviewCollection
@@ -640,7 +672,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/analytics/summary", async (req, res) => {
+    app.get("/analytics/summary", verifyToken, async (req, res) => {
       const totalPatients = await userCollection.countDocuments({
         role: "patient",
       });
@@ -660,7 +692,7 @@ async function run() {
       });
     });
 
-    app.get("/analytics/doctor-performance", async (req, res) => {
+    app.get("/analytics/doctor-performance", verifyToken, async (req, res) => {
 
       const result = await doctorCollection
         .aggregate([
@@ -722,7 +754,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/analytics/monthly-trend", async (req, res) => {
+    app.get("/analytics/monthly-trend", verifyToken, async (req, res) => {
 
       const result = await appointmentCollection.aggregate([
         {
@@ -781,7 +813,7 @@ async function run() {
       );
     });
 
-    app.post("/schedules", async (req,res)=>{
+    app.post("/schedules", verifyToken, async (req,res)=>{
       const schedule=req.body;
 
       schedule.createdAt=new Date();
@@ -793,7 +825,7 @@ async function run() {
       res.json(result);
     });
 
-    app.post("/appointments", async (req, res) => {
+    app.post("/appointments", verifyToken, async (req, res) => {
       try {
         const appointment = req.body;
 
@@ -853,7 +885,7 @@ async function run() {
       }
     });
 
-    app.post("/prescriptions", async (req, res) => {
+    app.post("/prescriptions", verifyToken, async (req, res) => {
       const prescription = req.body;
  
       prescription.createdAt = new Date();
@@ -864,7 +896,7 @@ async function run() {
       res.json(result);
     });
 
-    app.post("/reviews", async (req, res) => {
+    app.post("/reviews", verifyToken, async (req, res) => {
       const {
         appointmentId,
         doctorId,
@@ -914,7 +946,7 @@ async function run() {
       });
     });
 
-    app.put('/users/:id', async (req, res) => {
+    app.put('/users/:id', verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
         const { name, email, gender, photoUrl } = req.body;
@@ -947,7 +979,7 @@ async function run() {
       }
     });
 
-    app.put("/doctors/:userId", async (req, res) => {
+    app.put("/doctors/:userId", verifyToken, async (req, res) => {
       const { userId } = req.params;
       const updateData = req.body;
 
@@ -978,7 +1010,7 @@ async function run() {
       });
     });
 
-    app.patch("/schedules/:id",async(req,res)=>{
+    app.patch("/schedules/:id", verifyToken, async(req,res)=>{
 
         const {id}=req.params;
 
@@ -998,7 +1030,7 @@ async function run() {
 
     })
 
-    app.patch("/appointments/:id/status", async (req, res) => {
+    app.patch("/appointments/:id/status", verifyToken, async (req, res) => {
       const { id } = req.params;
 
       const { status } = req.body;
@@ -1048,7 +1080,7 @@ async function run() {
       });
     });
 
-    app.patch("/doctors/:userId/verification", async (req, res) => {
+    app.patch("/doctors/:userId/verification", verifyToken, async (req, res) => {
       const { userId } = req.params;
       const { status } = req.body; // "verified" | "rejected" | "pending"
  
@@ -1064,7 +1096,7 @@ async function run() {
       res.json({ success: true });
     });
 
-    app.patch('/users/:id/status', async (req, res) => {
+    app.patch('/users/:id/status', verifyToken, async (req, res) => {
       const { id } = req.params;
       const { status } = req.body; 
  
@@ -1083,7 +1115,7 @@ async function run() {
       res.json({ success: true });
     });
 
-    app.patch("/prescriptions/:id", async (req, res) => {
+    app.patch("/prescriptions/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const data = req.body;
  
@@ -1095,7 +1127,7 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/reviews/:id", async (req, res) => {
+    app.patch("/reviews/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
 
       const { rating, comment } = req.body;
@@ -1116,7 +1148,7 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/appointments/:id/payment", async (req, res) => {
+    app.patch("/appointments/:id/payment", verifyToken, async (req, res) => {
       try {
         const { id } = req.params;
         const { transactionId, paymentSessionId, amountPaid } = req.body;
@@ -1156,7 +1188,7 @@ async function run() {
       }
     });
 
-    app.delete('/users/:id', async (req, res) => {
+    app.delete('/users/:id', verifyToken, async (req, res) => {
       const { id } = req.params;
       await userCollection.deleteOne({ _id: new ObjectId(id) });
       await doctorCollection.deleteOne({ userId: id });
@@ -1164,7 +1196,7 @@ async function run() {
       res.json({ success: true });
     });
 
-    app.delete("/schedules/:id",async(req,res)=>{
+    app.delete("/schedules/:id", verifyToken, async(req,res)=>{
 
       const {id}=req.params;
 
@@ -1176,7 +1208,7 @@ async function run() {
 
     });
 
-    app.delete("/appointments/:id", async (req, res) => {
+    app.delete("/appointments/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
 
       const result = await appointmentCollection.deleteOne({
@@ -1186,7 +1218,7 @@ async function run() {
       res.json(result);
     });
 
-    app.delete("/reviews/:id", async (req, res) => {
+    app.delete("/reviews/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
 
       const result = await reviewCollection.deleteOne({
