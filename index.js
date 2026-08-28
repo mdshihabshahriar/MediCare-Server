@@ -147,6 +147,27 @@ async function run() {
       });
     });
 
+    app.get('/users/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid user id" });
+        }
+
+        const user = await userCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json(user);
+      } catch (err) {
+        console.error("Get user error:", err);
+        res.status(500).json({ message: err.message });
+      }
+    });
+
     app.get('/admin/recent-activity', async (req, res) => {
       const recentUsers = await userCollection
         .find({})
@@ -855,6 +876,39 @@ async function run() {
         success: true,
         insertedId: result.insertedId.toString(),
       });
+    });
+
+    app.put('/users/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { name, email, gender, photoUrl } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid user id" });
+        }
+
+        const result = await userCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              name,
+              email,
+              gender,
+              photoUrl,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: "User not found" });
+        }
+
+        res.json({ success: true });
+      } catch (err) {
+        console.error("Update user error:", err);
+        res.status(500).json({ message: err.message });
+      }
     });
 
     app.put("/doctors/:userId", async (req, res) => {
