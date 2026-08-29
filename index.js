@@ -41,12 +41,12 @@ const verifyToken = async (req, res, next) => {
     try{
       const {payload} = await jwtVerify(token, JWKS)
 
-      console.log(payload)
+      // console.log(payload)
       next()
     }
 
     catch(error){
-      console.log(error)
+      // console.log(error)
       res.status(401).json({ message: 'Unauthorized access' });
     }
 
@@ -194,8 +194,62 @@ async function run() {
 
     app.get('/doctors/:userId', async (req, res) => {
       const { userId } = req.params;
-      const result = await doctorCollection.findOne({ userId });
-      res.json(result); 
+
+      const result = await doctorCollection.aggregate([
+        { $match: { userId } },
+        {
+          $lookup: {
+            from: "user",
+            let: { uid: "$userId" },
+            pipeline: [
+              { $match: { $expr: { $eq: [{ $toString: "$_id" }, "$$uid"] } } },
+            ],
+            as: "userInfo",
+          },
+        },
+        { $unwind: "$userInfo" },
+        {
+          $lookup: {
+            from: "reviews",
+            let: { docId: "$userId" },
+            pipeline: [{ $match: { $expr: { $eq: ["$doctorId", "$$docId"] } } }],
+            as: "doctorReviews",
+          },
+        },
+        {
+          $addFields: {
+            averageRating: {
+              $cond: [
+                { $gt: [{ $size: "$doctorReviews" }, 0] },
+                { $round: [{ $avg: "$doctorReviews.rating" }, 1] },
+                0,
+              ],
+            },
+          },
+        },
+        {
+          $project: {
+            userId: 1,
+            specialty: 1,
+            hospitalName: 1,
+            qualifications: 1,
+            experience: 1,
+            consultationFee: 1,
+            rating: "$averageRating",
+            name: "$userInfo.name",
+            email: "$userInfo.email",
+            photoUrl: "$userInfo.photoUrl",
+            role: "$userInfo.role",
+            verificationStatus: "$userInfo.verificationStatus",
+          },
+        },
+      ]).toArray();
+
+      if (!result.length) {
+        return res.status(404).json({ message: "Doctor not found" });
+      }
+
+      res.json(result[0]);
     });
 
     app.get('/admin/stats', verifyToken, async (req, res) => {
@@ -231,7 +285,7 @@ async function run() {
 
         res.json(user);
       } catch (err) {
-        console.error("Get user error:", err);
+        // console.error("Get user error:", err);
         res.status(500).json({ message: err.message });
       }
     });
@@ -876,7 +930,7 @@ async function run() {
         });
 
       } catch (error) {
-        console.error("Appointment creation error:", error);
+        // console.error("Appointment creation error:", error);
 
         res.status(500).json({
           success: false,
@@ -974,7 +1028,7 @@ async function run() {
 
         res.json({ success: true });
       } catch (err) {
-        console.error("Update user error:", err);
+        // console.error("Update user error:", err);
         res.status(500).json({ message: err.message });
       }
     });
@@ -1179,7 +1233,7 @@ async function run() {
           message: "Appointment payment updated successfully",
         });
       } catch (error) {
-        console.error("Update payment error:", error);
+        // console.error("Update payment error:", error);
 
         res.status(500).json({
           success: false,
