@@ -496,6 +496,58 @@ async function run() {
       res.json(result);
     });
 
+    app.get("/prescriptions/patient/:patientId", verifyToken, async (req, res) => {
+      const { patientId } = req.params;
+
+      const result = await prescriptionCollection
+        .aggregate([
+          { $match: { patientId } },
+          {
+            $lookup: {
+              from: "user",
+              let: { doctorId: "$doctorId" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: [{ $toString: "$_id" }, "$$doctorId"] },
+                  },
+                },
+              ],
+              as: "doctorUser",
+            },
+          },
+          { $unwind: { path: "$doctorUser", preserveNullAndEmptyArrays: true } },
+          {
+            $lookup: {
+              from: "doctors",
+              let: { doctorId: "$doctorId" },
+              pipeline: [
+                { $match: { $expr: { $eq: ["$userId", "$$doctorId"] } } },
+              ],
+              as: "doctorProfile",
+            },
+          },
+          { $unwind: { path: "$doctorProfile", preserveNullAndEmptyArrays: true } },
+          {
+            $addFields: {
+              doctorName: "$doctorUser.name",
+              doctorPhoto: "$doctorUser.photoUrl",
+              specialty: "$doctorProfile.specialty",
+            },
+          },
+          {
+            $project: {
+              doctorUser: 0,
+              doctorProfile: 0,
+            },
+          },
+          { $sort: { createdAt: -1 } },
+        ])
+        .toArray();
+
+      res.json(result);
+    });
+
     app.get("/appointments/doctor/:doctorId", verifyToken, async (req, res) => {
       const { doctorId } = req.params;
 
